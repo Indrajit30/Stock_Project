@@ -141,6 +141,119 @@ def _api_key_configured() -> bool:
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
+def _num(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_money(value) -> str:
+    n = _num(value)
+    if n is None:
+        return "not available"
+    abs_n = abs(n)
+    if abs_n >= 1_000_000_000_000:
+        return f"${n / 1_000_000_000_000:.1f}T"
+    if abs_n >= 1_000_000_000:
+        return f"${n / 1_000_000_000:.1f}B"
+    if abs_n >= 1_000_000:
+        return f"${n / 1_000_000:.1f}M"
+    return f"${n:,.0f}"
+
+
+def _fmt_percent(value) -> str:
+    n = _num(value)
+    if n is None:
+        return "not available"
+    if abs(n) <= 2:
+        n *= 100
+    return f"{n:.1f}%"
+
+
+def _fallback_report(ticker: str, bundle: dict) -> dict:
+    financials = bundle.get("financials") or {}
+    snowflake = bundle.get("snowflake") or {}
+    company_name = bundle.get("company_name") or f"{ticker} Corp."
+
+    score_values = [
+        _num(snowflake.get(name))
+        for name in ("value", "growth", "health", "momentum", "smart_money")
+    ]
+    score_values = [value for value in score_values if value is not None]
+    average_score = sum(score_values) / len(score_values) if score_values else 5
+    growth = _num(financials.get("revenue_growth_yoy"))
+    debt_to_equity = _num(financials.get("debt_to_equity"))
+    gross_margin = _num(financials.get("gross_margin"))
+    pe_ratio = _num(financials.get("pe_ratio"))
+
+    if average_score >= 7 and (growth is None or growth >= 0) and (debt_to_equity is None or debt_to_equity <= 2):
+        verdict = "buy"
+    elif average_score < 4 or (debt_to_equity is not None and debt_to_equity > 4):
+        verdict = "avoid"
+    else:
+        verdict = "wait"
+
+    confidence = max(0.35, min(0.75, 0.45 + abs(average_score - 5) / 10))
+    summary = (
+        f"{company_name} currently screens as a {verdict.upper()} based on live fundamentals "
+        "and local scoring data. This is a data-only report because OPENAI_API_KEY is not "
+        "configured, so narrative synthesis and management-tone analysis were skipped."
+    )
+
+    bulls = [
+        {
+            "text": f"Revenue over the trailing twelve months is {_fmt_money(financials.get('revenue_ttm'))}.",
+            "source": "Live fundamentals data",
+            "source_url": "",
+        },
+        {
+            "text": f"Gross margin is {_fmt_percent(gross_margin)}, which helps frame operating quality.",
+            "source": "Live fundamentals data",
+            "source_url": "",
+        },
+        {
+            "text": f"The composite local score is {average_score:.1f}/10 across value, growth, health, momentum, and smart-money signals.",
+            "source": "Local scoring model",
+            "source_url": "",
+        },
+    ]
+
+    risks = [
+        {
+            "text": f"Revenue growth is {_fmt_percent(growth)}, so growth momentum should be checked against the latest filing and earnings call.",
+            "source": "Live fundamentals data",
+            "source_url": "",
+        },
+        {
+            "text": f"Debt-to-equity is {debt_to_equity:.2f}." if debt_to_equity is not None else "Debt-to-equity was not available from the live data feed.",
+            "source": "Live fundamentals data",
+            "source_url": "",
+        },
+        {
+            "text": f"P/E ratio is {pe_ratio:.1f}, so valuation risk depends on whether future growth can justify the multiple." if pe_ratio is not None else "P/E ratio was not available from the live data feed.",
+            "source": "Live fundamentals data",
+            "source_url": "",
+        },
+    ]
+
+    return {
+        "ticker": ticker,
+        "company_name": company_name,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "verdict": verdict,
+        "verdict_confidence": round(confidence, 2),
+        "plain_english_summary": summary,
+        "three_bulls": bulls,
+        "three_risks": risks,
+        "snowflake_scores": snowflake,
+        "financials": financials,
+        "hedging_detector": "OpenAI API key not configured; management-tone analysis skipped.",
+    }
+
+
 @router.get("/stock/{ticker}/report")
 async def get_report(
     ticker: str,
@@ -209,15 +322,10 @@ async def stream_report(ticker: str, request: Request):
             await asyncio.sleep(0.08)
 
         if not _api_key_configured():
-            yield _sse(
-                {
-                    "event": "error",
-                    "message": (
-                        "OPENAI_API_KEY is not configured. Add it to "
-                        "/Users/arunnair/Desktop/AI_llm_project/.env and restart the backend."
-                    ),
-                }
-            )
+            report = _fallback_report(ticker, bundle)
+            if cache:
+                await cache.set(f"stock:{ticker}:report:{REPORT_CACHE_VERSION}", jsonable_encoder(report), 3600)
+            yield _sse({"event": "data", "section": "verdict", "payload": report})
             yield _sse({"event": "done", "ticker": ticker, "generated_at": datetime.now(timezone.utc)})
             return
 
