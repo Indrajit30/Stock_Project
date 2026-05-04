@@ -93,8 +93,8 @@ class SuperinvestorCluster(BaseModel):
 
 class DiffSection(BaseModel):
     section_name: str
-    additions: list[str]
-    deletions: list[str]
+    positives: list[str]
+    negatives: list[str]
     summary: str
 
 

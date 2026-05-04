@@ -626,33 +626,108 @@ a {
   overflow-x: auto;
 }
 
-.diff-line {
+.diff-columns {
   display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 8px;
-  margin: 4px 0;
-  border-radius: 6px;
-  padding: 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 4px;
 }
 
-.diff-add {
+@media (max-width: 640px) {
+  .diff-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.diff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-col-header {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent;
+}
+
+.diff-col-header-positive {
+  background: #f0fdf4;
+  color: #15803d;
+  border-bottom-color: #16a34a;
+}
+
+.diff-col-header-negative {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-bottom-color: #dc2626;
+}
+
+.diff-col-empty {
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.diff-item {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  align-items: start;
+}
+
+.diff-item-icon {
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.diff-item-positive {
   background: #f0fdf4;
   color: #14532d;
   border-left: 3px solid #16a34a;
 }
 
-.diff-del {
+.diff-item-positive .diff-item-icon {
+  color: #16a34a;
+}
+
+.diff-item-negative {
   background: #fef2f2;
   color: #7f1d1d;
   border-left: 3px solid #dc2626;
-  text-decoration: line-through;
 }
 
-.diff-context {
-  background: #f8fafc;
-  color: #475569;
+.diff-item-negative .diff-item-icon {
+  color: #dc2626;
+}
+
+.dark .diff-col-header-positive {
+  background: #052e16;
+  color: #4ade80;
+  border-bottom-color: #16a34a;
+}
+
+.dark .diff-col-header-negative {
+  background: #2d0a0a;
+  color: #f87171;
+  border-bottom-color: #dc2626;
+}
+
+.dark .diff-item-positive {
+  background: #052e16;
+  color: #86efac;
+}
+
+.dark .diff-item-negative {
+  background: #2d0a0a;
+  color: #fca5a5;
 }
 
 .table-scroll {

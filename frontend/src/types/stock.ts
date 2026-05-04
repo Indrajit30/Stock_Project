@@ -83,8 +83,8 @@ export interface DiffLine {
 export interface FilingDiffSection {
   section_name: string
   summary: string
-  additions: string[]
-  deletions: string[]
+  positives: string[]
+  negatives: string[]
 }
 
 export interface FilingDiff {

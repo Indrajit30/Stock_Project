@@ -434,14 +434,14 @@ def _filing_insights(bundle: dict) -> list[str]:
     for section in (diff.get("changed_sections") or [])[:4]:
         name = _plain(section.get("section_name"), "Filing section")
         summary = _plain(section.get("summary"), "")
-        additions = [
-            item for item in (section.get("additions") or [])
-            if len(str(item)) > 40
-        ][:3]
+        positives = [item for item in (section.get("positives") or []) if len(str(item)) > 40][:2]
+        negatives = [item for item in (section.get("negatives") or []) if len(str(item)) > 40][:1]
         if summary:
             insights.append(f"{name}: {summary}.")
-        for item in additions:
-            insights.append(f"{name}: {_shorten(item, 220)}")
+        for item in positives:
+            insights.append(f"{name} (positive): {_shorten(item, 220)}")
+        for item in negatives:
+            insights.append(f"{name} (negative): {_shorten(item, 220)}")
     return insights[:8]
 
 
@@ -843,10 +843,10 @@ async def export_excel(ticker: str, request: Request):
         diff = await cache.get(f"stock:{ticker}:filing_diff")
         if diff:
             for sec in diff.get("changed_sections", []):
-                for a in sec.get("additions", []):
-                    ws4.append([sec["section_name"], "Addition", a])
-                for d in sec.get("deletions", []):
-                    ws4.append([sec["section_name"], "Deletion", d])
+                for p in sec.get("positives", []):
+                    ws4.append([sec["section_name"], "Positive", p])
+                for n in sec.get("negatives", []):
+                    ws4.append([sec["section_name"], "Negative", n])
     _style_header(ws4)
     _auto_width(ws4)
 

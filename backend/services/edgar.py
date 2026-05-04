@@ -269,6 +269,70 @@ async def get_institutional_ownership(ticker: str, cache=None) -> InstitutionalO
     )
 
 
+async def _classify_diff_section(
+    ticker: str,
+    section: str,
+    additions: list[str],
+    deletions: list[str],
+    prior_date: str,
+    current_date: str,
+) -> tuple[list[str], list[str], str]:
+    """Use LLM to classify raw diff lines into human-readable positives/negatives."""
+    from agent.llm_router import llm_router
+    import json as _json
+
+    if not additions and not deletions:
+        no_change = f"No material changes detected in {section} between {prior_date} and {current_date}."
+        return [], [no_change], no_change
+
+    added_block = "\n".join(f"+ {l}" for l in additions) if additions else "(none)"
+    removed_block = "\n".join(f"- {l}" for l in deletions) if deletions else "(none)"
+
+    prompt = f"""You are analyzing changes between two SEC {section} sections for {ticker}.
+
+ADDED lines (new in current filing):
+{added_block}
+
+REMOVED lines (removed from prior filing):
+{removed_block}
+
+Classify ALL changes above (both additions and removals) as either POSITIVE or NEGATIVE developments for the company and its investors.
+An addition is not automatically positive — a newly added risk warning is negative. A removed hedge clause is positive.
+
+Return ONLY valid JSON with this exact shape:
+{{
+  "positives": ["<plain English paraphrase>", ...],
+  "negatives": ["<plain English paraphrase>", ...],
+  "summary": "<1 sentence plain English overview of what changed>"
+}}
+
+Rules:
+- Each item must be a complete sentence in plain English — no jargon, no SEC boilerplate, no raw numbers without context.
+- Keep it technically accurate but understandable to a non-finance reader (e.g. "Revenue grew 28% year-over-year to $885M" not "Revenue $ 885,651").
+- If a change is purely structural/boilerplate with no meaningful signal, omit it.
+- If there are truly no positives or no negatives, return an empty array for that key."""
+
+    try:
+        raw = await llm_router.complete_fast(prompt=prompt, max_tokens=800)
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = _json.loads(raw)
+        positives = [str(p) for p in data.get("positives", [])]
+        negatives = [str(n) for n in data.get("negatives", [])]
+        summary = str(data.get("summary", f"Changes detected in {section}."))
+        return positives, negatives, summary
+    except Exception as exc:
+        logger.warning("LLM classification failed for %s %s: %s", ticker, section, exc)
+        return (
+            [l.strip() for l in additions if l.strip()],
+            [l.strip() for l in deletions if l.strip()],
+            f"{len(additions)} additions, {len(deletions)} deletions in {section}.",
+        )
+
+
 async def compute_filing_diff(ticker: str, form_type: str = "10-Q") -> FilingDiff:
     filings = await get_recent_filings(ticker, form_types=[form_type])
     sections_of_interest = ["MD&A", "Risk Factors", "Financial Statements"]
@@ -279,27 +343,30 @@ async def compute_filing_diff(ticker: str, form_type: str = "10-Q") -> FilingDif
             text_a = await get_filing_text(filings[1]["document_url"])
             text_b = await get_filing_text(filings[0]["document_url"])
 
+            classify_tasks = []
             for section in sections_of_interest:
                 lines_a = _section_lines(text_a, section)
                 lines_b = _section_lines(text_b, section)
                 diff = list(difflib.unified_diff(lines_a, lines_b, lineterm=""))
                 additions = [l[1:] for l in diff if l.startswith("+") and not l.startswith("+++")][:20]
                 deletions = [l[1:] for l in diff if l.startswith("-") and not l.startswith("---")][:20]
-                if not additions and not deletions:
-                    additions = [
-                        (
-                            "No material line-level changes detected in this section between "
-                            f"{filings[1]['filed_date']} and {filings[0]['filed_date']}."
-                        )
-                    ]
-                changed_sections.append(
-                    DiffSection(
-                        section_name=section,
-                        additions=additions,
-                        deletions=deletions,
-                        summary=f"{len(additions)} additions, {len(deletions)} deletions",
-                    )
-                )
+                classify_tasks.append((
+                    section,
+                    _classify_diff_section(
+                        ticker, section, additions, deletions,
+                        filings[1]["filed_date"], filings[0]["filed_date"],
+                    ),
+                ))
+
+            results = await asyncio.gather(*[t for _, t in classify_tasks], return_exceptions=True)
+            for (section, _), result in zip(classify_tasks, results):
+                if isinstance(result, Exception):
+                    logger.warning("classify_diff_section error for %s %s: %s", ticker, section, result)
+                    changed_sections.append(DiffSection(section_name=section, positives=[], negatives=[], summary="Classification failed."))
+                else:
+                    positives, negatives, summary = result
+                    changed_sections.append(DiffSection(section_name=section, positives=positives, negatives=negatives, summary=summary))
+
         except Exception as exc:
             logger.warning("Filing diff failed for %s: %s", ticker, exc)
 
