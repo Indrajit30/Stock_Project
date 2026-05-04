@@ -20,8 +20,8 @@ export default function Layout() {
     <>
       <header className="top-nav">
         <div className="nav-inner">
-          <Link to="/" className="brand-mark" aria-label="StockAI home">
-            <span className="brand-name">StockAI</span>
+          <Link to="/" className="brand-mark" aria-label="Stock Research AI home">
+            <span className="brand-name">Stock Research AI</span>
             <span className="brand-tagline">Research in seconds</span>
           </Link>
           <SearchBox />

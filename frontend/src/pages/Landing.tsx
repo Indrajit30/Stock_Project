@@ -15,7 +15,7 @@ export default function Landing() {
     <div className="page-frame">
       <section className="landing-hero">
         <div className="landing-panel">
-          <h1>Stock research that takes seconds, not hours</h1>
+          <h1>Stock Research AI</h1>
           <p className="landing-subtext">
             AI-powered analysis with citations from SEC filings - for retail and professional investors.
           </p>
