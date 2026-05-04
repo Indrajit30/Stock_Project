@@ -191,6 +191,43 @@ class StockReportOrchestrator:
         async for step in tracer.trace_report_generation(ticker, cached_data):
             yield step
 
+    def _compute_confidence(self, verdict: str, data: dict, bulls: list, risks: list) -> float:
+        score = 0.45
+
+        # Data availability — more sources = more confident
+        fin = data.get("financials") or {}
+        fin_dict = fin if isinstance(fin, dict) else fin.model_dump()
+        filled = sum(1 for v in fin_dict.values() if v is not None)
+        score += min(filled * 0.012, 0.10)
+
+        if data.get("transcript", "").strip():
+            score += 0.06
+        if data.get("filing_10q_text", "").strip():
+            score += 0.05
+        if data.get("sentiment") is not None:
+            score += 0.03
+
+        # Snowflake alignment with verdict
+        sf = data.get("snowflake_scores") or {}
+        sf_dict = sf if isinstance(sf, dict) else sf.model_dump()
+        sf_vals = [v for v in sf_dict.values() if isinstance(v, (int, float))]
+        if sf_vals:
+            avg = sum(sf_vals) / len(sf_vals)
+            if verdict == "buy" and avg >= 6.5:
+                score += 0.08
+            elif verdict == "avoid" and avg <= 4.5:
+                score += 0.08
+            elif verdict == "wait" and 4 <= avg <= 7:
+                score += 0.05
+
+        # Citation completeness
+        if len(bulls) >= 3 and len(risks) >= 3:
+            score += 0.07
+        elif len(bulls) >= 2 and len(risks) >= 2:
+            score += 0.03
+
+        return round(min(max(score, 0.40), 0.92), 2)
+
     def _build_citation_url(self, ticker: str, source: str) -> str:
         sl = source.lower()
         if "10-q" in sl or "10q" in sl:
@@ -237,7 +274,7 @@ class StockReportOrchestrator:
                 company_name=data.get("company_name") or f"{ticker} Corp.",
                 generated_at=datetime.utcnow(),
                 verdict=verdict,
-                verdict_confidence=float(data.get("verdict_confidence", 0.5)),
+                verdict_confidence=self._compute_confidence(verdict, all_data, bulls, risks),
                 plain_english_summary=data.get(
                     "plain_english_summary", "Analysis unavailable."
                 ),

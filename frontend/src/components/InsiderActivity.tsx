@@ -79,7 +79,6 @@ function InstitutionalOwnershipCard({ ownership }: { ownership: InstitutionalOwn
                   <th style={{ textAlign: 'left', padding: '4px 8px', color: '#6b7280', fontWeight: 500 }}>Fund / Institution</th>
                   <th style={{ textAlign: 'right', padding: '4px 8px', color: '#6b7280', fontWeight: 500 }}>Shares</th>
                   <th style={{ textAlign: 'right', padding: '4px 8px', color: '#6b7280', fontWeight: 500 }}>Value</th>
-                  <th style={{ textAlign: 'right', padding: '4px 8px', color: '#6b7280', fontWeight: 500 }}>% of Float</th>
                 </tr>
               </thead>
               <tbody>
@@ -88,7 +87,6 @@ function InstitutionalOwnershipCard({ ownership }: { ownership: InstitutionalOwn
                     <td style={{ padding: '5px 8px', fontWeight: 500 }}>{h.name}</td>
                     <td style={{ padding: '5px 8px', textAlign: 'right', color: '#374151' }}>{h.shares >= 1e6 ? `${(h.shares / 1e6).toFixed(1)}M` : h.shares.toLocaleString()}</td>
                     <td style={{ padding: '5px 8px', textAlign: 'right', color: '#374151' }}>{fmt(h.value_usd)}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', color: '#374151' }}>{fmt(h.pct_outstanding, true)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -97,26 +95,6 @@ function InstitutionalOwnershipCard({ ownership }: { ownership: InstitutionalOwn
         </>
       )}
 
-      {hasStakeholders && (
-        <>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
-            Major Stakeholders &gt;5% (SEC 13G/13D Filings)
-          </h3>
-          {ownership.major_stakeholders.map((s, i) => (
-            <div className="trade-row" key={i}>
-              <strong>
-                {s.name}
-                {s.is_activist && <span className="badge avoid" style={{ marginLeft: 6 }}>Activist 13D</span>}
-                {!s.is_activist && <span className="badge wait" style={{ marginLeft: 6 }}>Passive 13G</span>}
-              </strong>
-              <span className="muted">Filed {s.filed_date} · {s.filing_type}</span>
-            </div>
-          ))}
-          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-            Source: SEC EDGAR. 13G = passive holder (&gt;5%). 13D = activist with intent to influence management.
-          </p>
-        </>
-      )}
     </section>
   )
 }
