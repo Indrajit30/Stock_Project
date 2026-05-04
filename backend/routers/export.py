@@ -533,6 +533,12 @@ async def export_pdf(ticker: str, request: Request):
     fin["ticker"] = ticker
     peer_label, peers = await _peer_rows(ticker, fin, profile, cache)
     thesis = _recommendation(fin, profile, peers)
+    # Sync rating and confidence with the cached AI verdict so PDF matches the webpage
+    _verdict_map = {"buy": "BUY", "wait": "HOLD", "avoid": "SELL"}
+    if report.get("verdict"):
+        thesis["rating"] = _verdict_map.get(str(report["verdict"]).lower(), thesis["rating"])
+    if report.get("verdict_confidence") is not None:
+        thesis["confidence"] = float(report["verdict_confidence"])
     valuation_rows, dcf = _valuation_rows(fin, profile, peers)
     info = profile.get("info") or {}
 
