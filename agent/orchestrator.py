@@ -159,8 +159,16 @@ class StockReportOrchestrator:
             for i, r in enumerate(section_results)
         )
 
+        sf = all_data.get("snowflake_scores") or {}
+        try:
+            sf_dict = sf if isinstance(sf, dict) else sf.model_dump()
+        except Exception:
+            sf_dict = {}
+        sf_summary = ", ".join(f"{k}={v:.1f}" for k, v in sf_dict.items() if isinstance(v, (int, float)))
+
         synthesis_prompt = (
             f"Based on this comprehensive analysis of {ticker}:\n\n"
+            f"Snowflake scores (0-10): {sf_summary or 'unavailable'}\n\n"
             f"{combined}\n\n"
             f"Produce a final investment verdict in this exact JSON structure:\n"
             f'{{\n'
@@ -174,8 +182,14 @@ class StockReportOrchestrator:
             f'  ],\n'
             f'  "three_risks": [ ...same structure... ]\n'
             f'}}\n\n'
-            f"Rules:\n"
-            f"- verdict_confidence > 0.8 only if multiple data points agree\n"
+            f"Verdict criteria — pick the ONE that fits best:\n"
+            f"- \"buy\": fundamentals are strong (revenue growing, margins healthy), "
+            f"snowflake avg >= 6.5, management tone is confident, risks are manageable\n"
+            f"- \"avoid\": material risks dominate (high debt, declining revenue, regulatory threat, "
+            f"snowflake avg <= 4), risks clearly outweigh positives\n"
+            f"- \"wait\": signals are genuinely mixed — use this ONLY when buy and avoid are both "
+            f"plausible; do NOT default to wait out of caution\n\n"
+            f"Other rules:\n"
             f"- every bull/risk MUST have a source from the analysis above\n"
             f"- plain_english_summary must be jargon-free (no EBITDA, no YoY)\n"
             f"- respond with ONLY the JSON object, no markdown fences"
@@ -192,41 +206,33 @@ class StockReportOrchestrator:
             yield step
 
     def _compute_confidence(self, verdict: str, data: dict, bulls: list, risks: list) -> float:
-        score = 0.45
-
-        # Data availability — more sources = more confident
-        fin = data.get("financials") or {}
-        fin_dict = fin if isinstance(fin, dict) else fin.model_dump()
-        filled = sum(1 for v in fin_dict.values() if v is not None)
-        score += min(filled * 0.012, 0.10)
-
-        if data.get("transcript", "").strip():
-            score += 0.06
-        if data.get("filing_10q_text", "").strip():
-            score += 0.05
-        if data.get("sentiment") is not None:
-            score += 0.03
-
-        # Snowflake alignment with verdict
+        # Drive confidence from snowflake scores — they vary meaningfully per stock
         sf = data.get("snowflake_scores") or {}
-        sf_dict = sf if isinstance(sf, dict) else sf.model_dump()
+        try:
+            sf_dict = sf if isinstance(sf, dict) else sf.model_dump()
+        except Exception:
+            sf_dict = {}
         sf_vals = [v for v in sf_dict.values() if isinstance(v, (int, float))]
+
         if sf_vals:
-            avg = sum(sf_vals) / len(sf_vals)
-            if verdict == "buy" and avg >= 6.5:
-                score += 0.08
-            elif verdict == "avoid" and avg <= 4.5:
-                score += 0.08
-            elif verdict == "wait" and 4 <= avg <= 7:
-                score += 0.05
+            avg = sum(sf_vals) / len(sf_vals)  # 0–10
+            if verdict == "buy":
+                # High snowflake avg = strong buy conviction
+                base = 0.42 + (avg / 10) * 0.48
+            elif verdict == "avoid":
+                # Low snowflake avg = strong avoid conviction
+                base = 0.42 + ((10 - avg) / 10) * 0.48
+            else:
+                # Wait: most confident when signals are genuinely mixed (avg near 5)
+                base = 0.52 + max(0.0, 2.5 - abs(avg - 5)) * 0.07
+        else:
+            base = 0.50
 
-        # Citation completeness
+        # Small bonus for citation completeness
         if len(bulls) >= 3 and len(risks) >= 3:
-            score += 0.07
-        elif len(bulls) >= 2 and len(risks) >= 2:
-            score += 0.03
+            base += 0.04
 
-        return round(min(max(score, 0.40), 0.92), 2)
+        return round(min(max(base, 0.40), 0.92), 2)
 
     def _build_citation_url(self, ticker: str, source: str) -> str:
         sl = source.lower()
