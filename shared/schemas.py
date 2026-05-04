@@ -120,3 +120,27 @@ class SentimentPulse(BaseModel):
     reddit_mention_count: int
     top_posts: list[RedditPost]
     updated_at: datetime
+
+
+class InstitutionalHolder(BaseModel):
+    name: str
+    shares: float
+    value_usd: float | None = None
+    pct_outstanding: float | None = None
+    reported_date: str | None = None
+
+
+class MajorStakeholder(BaseModel):
+    name: str
+    filing_type: str  # "SC 13G" (passive) or "SC 13D" (activist)
+    filed_date: str
+    is_activist: bool
+
+
+class InstitutionalOwnership(BaseModel):
+    ticker: str
+    pct_institutional: float | None = None
+    pct_insider: float | None = None
+    top_holders: list[InstitutionalHolder]
+    major_stakeholders: list[MajorStakeholder]
+    updated_at: str

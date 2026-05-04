@@ -8,7 +8,7 @@ const INITIAL_STATE: StreamState = {
   sentiment: null,
   filing_diff: null,
   insider_cluster: null,
-  congressional_trades: null,
+  institutional_ownership: null,
   verdict: null,
   reasoning_steps: [],
   company_name: null,

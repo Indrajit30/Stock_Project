@@ -14,6 +14,9 @@ from shared.schemas import (
     FilingDiff,
     InsiderCluster,
     InsiderTrade,
+    InstitutionalHolder,
+    InstitutionalOwnership,
+    MajorStakeholder,
 )
 
 logger = logging.getLogger(__name__)
@@ -203,6 +206,67 @@ async def get_recent_8k_items(ticker: str) -> list[dict]:
         except Exception as exc:
             logger.warning("Failed to get 8-K items for %s: %s", ticker, exc)
     return items
+
+
+async def get_major_stakeholders_13g(ticker: str, days_back: int = 365) -> list[dict]:
+    """Fetch SC 13G/13D filers for a ticker — anyone who disclosed >5% ownership."""
+    start = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    stakeholders: list[dict] = []
+    seen: set[str] = set()
+
+    async with httpx.AsyncClient() as client:
+        for form_slug in ["SC+13G", "SC+13D"]:
+            url = (
+                f"https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22"
+                f"&forms={form_slug}&dateRange=custom&startdt={start}"
+            )
+            try:
+                resp = await _get(client, url)
+                hits = resp.json().get("hits", {}).get("hits", [])
+                for h in hits[:15]:
+                    src = h.get("_source", {})
+                    names = src.get("display_names") or []
+                    name = names[0] if names else "Unknown"
+                    if name in seen or name == "Unknown":
+                        continue
+                    seen.add(name)
+                    form_type = src.get("form_type", form_slug.replace("+", " "))
+                    filed_date = (src.get("file_date") or src.get("period_of_report") or "")[:10]
+                    stakeholders.append({
+                        "name": name,
+                        "filing_type": form_type,
+                        "filed_date": filed_date,
+                        "is_activist": "13D" in form_type,
+                    })
+            except Exception as exc:
+                logger.warning("EDGAR %s search failed for %s: %s", form_slug, ticker, exc)
+
+    stakeholders.sort(key=lambda x: x.get("filed_date", ""), reverse=True)
+    return stakeholders[:10]
+
+
+async def get_institutional_ownership(ticker: str, cache=None) -> InstitutionalOwnership:
+    """Combines yfinance top holders + EDGAR 13G/13D major stakeholders (>5%)."""
+    fetcher = DataFetcher(cache=cache)
+    holders_result, stakeholders_raw = await asyncio.gather(
+        fetcher.get_institutional_holders(ticker),
+        get_major_stakeholders_13g(ticker),
+        return_exceptions=True,
+    )
+
+    if isinstance(holders_result, Exception):
+        holders_result = {"holders": [], "pct_institutional": None, "pct_insider": None}
+    if isinstance(stakeholders_raw, Exception):
+        stakeholders_raw = []
+
+    return InstitutionalOwnership(
+        ticker=ticker,
+        pct_institutional=holders_result.get("pct_institutional"),
+        pct_insider=holders_result.get("pct_insider"),
+        top_holders=[InstitutionalHolder(**h) for h in holders_result.get("holders", [])],
+        major_stakeholders=[MajorStakeholder(**s) for s in stakeholders_raw],
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 async def compute_filing_diff(ticker: str, form_type: str = "10-Q") -> FilingDiff:

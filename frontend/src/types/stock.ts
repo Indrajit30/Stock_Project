@@ -95,16 +95,6 @@ export interface FilingDiff {
   changed_sections: FilingDiffSection[]
 }
 
-export interface CongressionalTrade {
-  politician_name: string
-  chamber: string
-  party: string
-  transaction_type: string
-  amount_range: string
-  trade_date: string
-  url?: string
-}
-
 export interface VerdictPayload {
   ticker: string
   company_name: string
@@ -143,13 +133,37 @@ export interface ReasoningStep {
   duration_ms?: number
 }
 
+export interface InstitutionalHolder {
+  name: string
+  shares: number
+  value_usd: number | null
+  pct_outstanding: number | null
+  reported_date: string | null
+}
+
+export interface MajorStakeholder {
+  name: string
+  filing_type: string
+  filed_date: string
+  is_activist: boolean
+}
+
+export interface InstitutionalOwnership {
+  ticker: string
+  pct_institutional: number | null
+  pct_insider: number | null
+  top_holders: InstitutionalHolder[]
+  major_stakeholders: MajorStakeholder[]
+  updated_at: string
+}
+
 export interface StreamState {
   financials: FinancialSnapshot | null
   snowflake: SnowflakeScores | null
   sentiment: SentimentPulse | null
   filing_diff: FilingDiff | null
   insider_cluster: InsiderCluster | null
-  congressional_trades: CongressionalTrade[] | null
+  institutional_ownership: InstitutionalOwnership | null
   verdict: VerdictPayload | null
   reasoning_steps: ReasoningStep[]
   company_name: string | null

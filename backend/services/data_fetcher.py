@@ -205,6 +205,67 @@ class DataFetcher:
             logger.warning("yfinance info fetch failed for %s: %s", ticker, exc)
             return {}
 
+    async def get_institutional_holders(self, ticker: str) -> dict:
+        """Returns top institutional holders and ownership percentages via yfinance."""
+        cache_key = f"yf:{ticker}:institutional"
+        if self._cache:
+            cached = await self._cache.get(cache_key)
+            if cached:
+                return cached
+        try:
+            import yfinance as yf
+            loop = asyncio.get_event_loop()
+
+            def _fetch():
+                t = yf.Ticker(ticker)
+                return t.institutional_holders, t.major_holders
+
+            inst_df, major_df = await loop.run_in_executor(None, _fetch)
+
+            def _safe(v):
+                if v is None:
+                    return None
+                try:
+                    f = float(v)
+                    return None if f != f else f  # NaN != NaN
+                except (TypeError, ValueError):
+                    return None
+
+            holders = []
+            if inst_df is not None and not inst_df.empty:
+                for _, row in inst_df.head(12).iterrows():
+                    d = row.to_dict()
+                    name = str(d.get("Holder") or "")
+                    if not name or name == "nan":
+                        continue
+                    date_raw = d.get("Date Reported")
+                    holders.append({
+                        "name": name,
+                        "shares": _safe(d.get("Shares")) or 0.0,
+                        "value_usd": _safe(d.get("Value")),
+                        "pct_outstanding": _safe(d.get("% Out")),
+                        "reported_date": str(date_raw)[:10] if date_raw is not None else None,
+                    })
+
+            pct_inst = pct_insider = None
+            if major_df is not None and not major_df.empty:
+                for _, row in major_df.iterrows():
+                    d = row.to_dict()
+                    breakdown = str(d.get("Breakdown") or d.get(1) or "").lower()
+                    value = _safe(d.get("Value") or d.get(0))
+                    if "institution" in breakdown and "float" not in breakdown:
+                        pct_inst = value
+                    elif "insider" in breakdown:
+                        pct_insider = value
+
+            result = {"holders": holders, "pct_institutional": pct_inst, "pct_insider": pct_insider}
+            if self._cache and holders:
+                await self._cache.set(cache_key, result, 6 * 60 * 60)
+            return result
+        except Exception as exc:
+            logger.warning("yfinance institutional holders failed for %s: %s", ticker, exc)
+            return {"holders": [], "pct_institutional": None, "pct_insider": None}
+
     async def get_financials(self, ticker: str) -> FinancialSnapshot:
         revenue_tags = [
             "RevenueFromContractWithCustomerExcludingAssessedTax",

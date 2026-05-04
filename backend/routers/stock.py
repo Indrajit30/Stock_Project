@@ -45,7 +45,7 @@ def _empty_sentiment(ticker: str) -> dict:
 
 async def _live_bundle(ticker: str, cache) -> dict:
     from backend.services.data_fetcher import DataFetcher
-    from backend.services.precompute import compute_snowflake_scores
+    from backend.services.precompute import compute_snowflake_scores, compute_snowflake_scores_llm
 
     fetcher = DataFetcher(cache=cache)
     identity = await fetcher.get_company_identity(ticker)
@@ -58,7 +58,7 @@ async def _live_bundle(ticker: str, cache) -> dict:
             logger.warning("Live %s fetch failed for %s: %s", name, ticker, exc)
             return default
 
-    price_history, transcript, news, filing_diff, insider_cluster, sentiment = (
+    price_history, transcript, news, filing_diff, insider_cluster, sentiment, institutional_ownership = (
         await asyncio.gather(
             _optional("price history", fetcher.get_price_history(ticker), []),
             _optional("transcript", fetcher.get_earnings_transcript(ticker), ""),
@@ -78,22 +78,31 @@ async def _live_bundle(ticker: str, cache) -> dict:
                 __import__("backend.services.sentiment", fromlist=["get_full_sentiment"]).get_full_sentiment(ticker),
                 _empty_sentiment(ticker),
             ),
+            _optional(
+                "institutional ownership",
+                __import__("backend.services.edgar", fromlist=["get_institutional_ownership"]).get_institutional_ownership(ticker, cache),
+                None,
+            ),
         )
     )
 
-    snowflake = compute_snowflake_scores(financials, price_history, insider_cluster, None)
+    company_name = identity.get("company_name") or f"{ticker} Corp."
+    snowflake = (
+        await compute_snowflake_scores_llm(ticker, company_name, financials, price_history, insider_cluster)
+        or compute_snowflake_scores(financials, price_history, insider_cluster, None)
+    )
 
     def dump(value):
         return value.model_dump() if hasattr(value, "model_dump") else value
 
     return {
-        "company_name": identity.get("company_name") or f"{ticker} Corp.",
+        "company_name": company_name,
         "financials": dump(financials),
         "snowflake": dump(snowflake),
         "filing_diff": dump(filing_diff),
         "insider_cluster": dump(insider_cluster) if insider_cluster else None,
         "sentiment": dump(sentiment),
-        "congressional_trades": [],
+        "institutional_ownership": dump(institutional_ownership) if institutional_ownership else None,
         "transcript": transcript or "",
         "filing_10q_text": "",
         "news": news or [],
@@ -111,7 +120,7 @@ async def _cached_or_live(cache, ticker: str) -> dict:
         "filing_diff": f"stock:{ticker}:filing_diff:{FILING_DIFF_CACHE_VERSION}",
         "insider_cluster": f"stock:{ticker}:insider_cluster",
         "sentiment": f"stock:{ticker}:sentiment",
-        "congressional_trades": f"stock:{ticker}:congressional_trades",
+        "institutional_ownership": f"stock:{ticker}:institutional_ownership",
         "report": f"stock:{ticker}:report:{REPORT_CACHE_VERSION}",
         "transcript": f"stock:{ticker}:transcript",
         "filing_10q_text": f"stock:{ticker}:filing_10q_text",
@@ -193,7 +202,7 @@ async def stream_report(ticker: str, request: Request):
             ("sentiment", bundle["sentiment"]),
             ("filing_diff", bundle["filing_diff"]),
             ("insider_cluster", bundle["insider_cluster"]),
-            ("congressional_trades", bundle["congressional_trades"]),
+            ("institutional_ownership", bundle.get("institutional_ownership")),
         ]
         for section, payload in static_sections:
             yield _sse({"event": "data", "section": section, "payload": payload})
@@ -220,7 +229,6 @@ async def stream_report(ticker: str, request: Request):
             "filing_diff": bundle["filing_diff"],
             "insider_cluster": bundle["insider_cluster"],
             "sentiment": bundle["sentiment"],
-            "congressional_trades": bundle["congressional_trades"],
             "transcript": bundle.get("transcript", ""),
             "filing_10q_text": bundle.get("filing_10q_text", ""),
             "news": bundle.get("news", []),
@@ -308,22 +316,6 @@ async def insider_cluster(ticker: str, request: Request):
         await cache.set(key, cluster.model_dump() if cluster else None, CacheTTL.INSIDER_TRADES)
     return JSONResponse(content=cluster.model_dump() if cluster else None)
 
-
-@router.get("/stock/{ticker}/congressional-trades")
-async def congressional_trades(ticker: str, request: Request):
-    ticker = ticker.upper()
-    cache = _cache(request)
-    key = f"stock:{ticker}:congressional_trades"
-    if cache:
-        cached = await cache.get(key)
-        if cached:
-            return JSONResponse(content=cached)
-    from backend.services.edgar import get_congressional_trades
-    trades = await get_congressional_trades(ticker)
-    if cache:
-        from backend.services.cache import CacheTTL
-        await cache.set(key, trades, CacheTTL.SEC_FILINGS)
-    return JSONResponse(content=trades)
 
 
 @router.get("/stock/{ticker}/sentiment")

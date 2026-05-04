@@ -12,7 +12,7 @@ from shared.schemas import PeerComparisonRow
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PEER_CACHE_VERSION = "v4"
+PEER_CACHE_VERSION = "v5"
 
 
 def _cache(request: Request):
@@ -94,8 +94,10 @@ async def get_peers(ticker: str, request: Request):
         if cached:
             return JSONResponse(content=cached)
 
+    import asyncio
+
     from backend.services.data_fetcher import DataFetcher
-    from backend.services.precompute import compute_snowflake_scores
+    from backend.services.precompute import compute_snowflake_scores, compute_snowflake_scores_llm
 
     fetcher = DataFetcher(cache=cache)
     identity = await fetcher.get_company_identity(ticker)
@@ -105,14 +107,27 @@ async def get_peers(ticker: str, request: Request):
     all_tickers = [ticker, *plan["peer_tickers"]]
     batch = await fetcher.get_batch_financials(all_tickers)
 
+    valid_symbols = [s for s in all_tickers if batch.get(s)]
+    identities = await asyncio.gather(*[fetcher.get_company_identity(s) for s in valid_symbols])
+    symbol_to_identity = {s: id_ for s, id_ in zip(valid_symbols, identities)}
+
+    async def _score_symbol(symbol):
+        fin = batch[symbol]
+        sym_name = symbol_to_identity[symbol].get("company_name") or symbol
+        llm_scores = await compute_snowflake_scores_llm(symbol, sym_name, fin)
+        return symbol, llm_scores or compute_snowflake_scores(fin, [], None, None)
+
+    scored = await asyncio.gather(*[_score_symbol(s) for s in valid_symbols])
+    symbol_to_snowflake = dict(scored)
+
     rows = []
-    for symbol in all_tickers:
+    for symbol in valid_symbols:
         fin = batch.get(symbol)
         if not fin:
             logger.warning("Skipping peer %s because SEC financials were unavailable", symbol)
             continue
-        row_identity = await fetcher.get_company_identity(symbol)
-        snowflake = compute_snowflake_scores(fin, [], None, None)
+        row_identity = symbol_to_identity[symbol]
+        snowflake = symbol_to_snowflake[symbol]
         row = PeerComparisonRow(
             ticker=symbol,
             company_name=row_identity.get("company_name") or symbol,

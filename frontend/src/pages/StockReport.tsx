@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import CitedPoints from '../components/CitedPoints'
-import CongressionalTrades from '../components/CongressionalTrades'
 import HedgingDetector from '../components/HedgingDetector'
 import InsiderActivity from '../components/InsiderActivity'
 import KeyMetrics from '../components/KeyMetrics'
@@ -92,9 +91,12 @@ export default function StockReport() {
           <div style={{ marginBottom: 16 }}>
             <SentimentPulse sentiment={state.sentiment} loaded={state.sentiment !== null} />
           </div>
-          <div className="activity-grid" style={{ marginBottom: 16 }}>
-            <InsiderActivity cluster={state.insider_cluster} loaded={state.insider_cluster !== null || state.status === 'done'} />
-            <CongressionalTrades trades={state.congressional_trades} loaded={state.congressional_trades !== null || state.status === 'done'} />
+          <div style={{ marginBottom: 16 }}>
+            <InsiderActivity
+              cluster={state.insider_cluster}
+              ownership={state.institutional_ownership}
+              loaded={state.insider_cluster !== null || state.institutional_ownership !== null || state.status === 'done'}
+            />
           </div>
           <HedgingDetector finding={state.verdict?.hedging_detector} loaded={state.verdict !== null} />
         </Tabs.Content>
